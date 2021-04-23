@@ -2,7 +2,7 @@
 title: "Rethink chapter 6 practice"
 output: 
   html_document:
-    keep_md: true
+    keep_md: false
 #output: html_notebook
 ---
 
@@ -42,7 +42,6 @@ Loading data to fit models
 ```{r}
 data("WaffleDivorce", package = "rethinking")
 d <- WaffleDivorce
-d
 ```
 ```{r}
 d$WaffleHouses
@@ -138,7 +137,6 @@ library(ggdag)
 ```{r}
 data("WaffleDivorce", package = "rethinking")
 d <- WaffleDivorce
-d
 ```
 
 ```{r}
