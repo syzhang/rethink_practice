@@ -1,9 +1,9 @@
 ---
 title: "Rethink chapter 6 practice"
-output: 
-  html_document:
-    keep_md: false
-#output: html_notebook
+#output: 
+#  html_document:
+#    keep_md: false
+output: html_notebook
 ---
 
 Problem 6H1
