@@ -1,6 +1,9 @@
 ---
 title: "Rethink chapter 6 practice"
-output: html_notebook
+output: 
+  html_document:
+    keep_md: true
+#output: html_notebook
 ---
 
 Problem 6H1
@@ -129,7 +132,7 @@ Using tidyverse below
 load tidyverse
 ```{r}
 library(tidyverse)
-#library(ggdag)
+library(ggdag)
 ```
 
 ```{r}
@@ -229,6 +232,9 @@ b6.17 <-
       iter = 2000, warmup = 1000, chains = 4, cores = 4,
       seed = 6,
       file = "fits/b06.17")
+```
+```{r}
+
 ```
 
 
