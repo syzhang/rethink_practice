@@ -1,0 +1,206 @@
+---
+title: "Rethink chapter 8 practice"
+output: html_notebook
+---
+
+8H5
+
+These data are expert ratings of 20 different French and American wines by 9 different French and American judges. Your goal is to model score, the subjective rating assigned by each judge to each wine.
+
+```{r}
+library(rethinking)
+data(Wines2012)
+d <- Wines2012
+```
+
+```{r}
+d
+```
+Standardise scores. Construct index variables of judge and wine and then use these index variables to construct a linear regression model. 
+```{r}
+dat_list <- list(
+    S = standardize(d$score),
+    jid = as.integer(d$judge),
+    wid = as.integer(d$wine) )
+```
+
+```{r}
+dat_list['jid']
+```
+```{r}
+dat_list['wid']
+```
+Model
+```{r}
+m1 <- ulam(
+    alist(
+        S ~ dnorm( mu , sigma ),
+        mu <- a[jid] + w[wid],
+        a[jid] ~ dnorm(0,0.5),
+        w[wid] ~ dnorm(0,0.5),
+        sigma ~ dexp(1)
+    ), data=dat_list , chains=4 , cores=4 , cmdstan=TRUE )
+```
+```{r}
+precis(m1, depth = 2)
+```
+```{r}
+coeftab_plot( coeftab(m1))
+```
+a - judges, varies quite a lot.
+w - wines, also varies a lot, perhaps a bit less than judges.
+
+
+
+8H6
+
+Now consider three features of the wines and judges:
+(1) flight: Whether the wine is red or white.
+(2) wine.amer: Indicator variable for American wines. 
+(3) judge.amer: Indicator variable for American judges.
+Use indicator or index variables to model the influence of these features on the scores. 
+```{r}
+dat_list2 <- list(
+    S = standardize(d$score),
+    W = d$wine.amer,
+    J = d$judge.amer,
+    R = ifelse(d$flight=="red",1L,0L) )
+```
+
+```{r}
+dat_list2['W']
+```
+```{r}
+dat_list2['J']
+```
+```{r}
+dat_list2['R']
+```
+
+model
+```{r}
+m2a <- ulam(
+    alist(
+        S ~ dnorm( mu , sigma ),
+        mu <- a + bW*W + bJ*J + bR*R,
+        a ~ dnorm( 0 , 0.2 ),
+        c(bW,bJ,bR) ~ dnorm( 0 , 0.5 ),
+        sigma ~ dexp(1)
+    ), data=dat_list2 , chains=4 , cores=4 , cmdstan=TRUE )
+```
+```{r}
+precis( m2a, 2)
+```
+
+```{r}
+coeftab_plot( coeftab(m2a))
+```
+R - red or white, pretty much the same.
+J - judge is American, scores tend to be higher.
+W - wine is American, scores tend to be lower.
+
+Instead of using indicator variables (1/0), we can also use index variables (1/2)
+
+```{r}
+dat_list2b <- list(
+    S = standardize(d$score),
+    wid = d$wine.amer + 1L,
+    jid = d$judge.amer + 1L,
+    fid = ifelse(d$flight=="red",1L,2L) )
+```
+
+```{r}
+m2b <- ulam(
+    alist(
+        S ~ dnorm( mu , sigma ),
+        mu <- w[wid] + j[jid] + f[fid],
+        w[wid] ~ dnorm( 0 , 0.5 ),
+        j[wid] ~ dnorm( 0 , 0.5 ),
+        f[wid] ~ dnorm( 0 , 0.5 ),
+        sigma ~ dexp(1)
+    ), data=dat_list2b , chains=4 , cores=4 , cmdstan=TRUE )
+```
+
+```{r}
+precis( m2b, 2)
+```
+```{r}
+coeftab_plot( coeftab(m2b))
+```
+differences are now smaller.
+
+Looking at difference between American (2) and non-American wines
+```{r}
+post <- extract.samples(m2b)
+diff_w <- post$w[,2] - post$w[,1]
+precis( diff_w)
+```
+```{r}
+precis( m2a ) # compare bW to diff_w
+```
+model m2b has lower values of n_eff, sample less efficiently, but gives similar results.
+
+
+
+8H7
+
+Now consider two-way interactions among the three features. You should end up with three different interaction terms in your model. These will be easier to build, if you use indicator variables.
+
+```{r}
+dat_list2 <- list(
+    S = standardize(d$score),
+    W = d$wine.amer,
+    J = d$judge.amer,
+    R = ifelse(d$flight=="red",1L,0L) )
+```
+model
+```{r}
+m3 <- ulam(
+    alist(
+        S ~ dnorm( mu , sigma ),
+        mu <- a + bW*W + bJ*J + bR*R +
+              bWJ*W*J + bWR*W*R + bJR*J*R,
+        a ~ dnorm(0,0.2),
+        c(bW,bJ,bR) ~ dnorm(0,0.5),
+        c(bWJ,bWR,bJR) ~ dnorm(0,0.25),
+        sigma ~ dexp(1)
+    ), data=dat_list2 , chains=4 , cores=4 , cmdstan=TRUE )
+```
+```{r}
+precis( m3)
+```
+
+
+```{r}
+coeftab_plot( coeftab(m3))
+```
+
+bR, bW, bJR, bWJ - close to 0
+bJ, bWR - further away from 0. 
+  - bJ - American judge higher scores
+  - bWR - interaction between American wine and red. (some kind of outlier?)
+  
+Predict wine score
+```{r}
+pred_dat <- data.frame(
+    W = rep( 0:1 , times=4 ),
+    J = rep( 0:1 , each=4 ),
+    R = rep( c(0,0,1,1) , times=2 ) )
+
+mu <- link( m3 , data=pred_dat )
+
+row_labels <- paste( ifelse(pred_dat$W==1,"A","F") , 
+                 ifelse(pred_dat$J==1,"A","F") , 
+                 ifelse(pred_dat$R==1,"R","W") , sep="" )
+```
+
+```{r}
+pred_dat
+```
+```{r}
+precis( list(mu=mu), 2)
+```
+red American wine by non-American judge is worse (mu4)
+red non-American wine by American judge is best (mu7)
+
+
