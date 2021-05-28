@@ -1,0 +1,161 @@
+---
+title: "Rethink chapter 11 practice"
+output: html_notebook
+---
+
+11H4
+
+data(NWOGrants), total and indirect causal effects of gender on grant awards?
+
+```{r}
+library(rethinking)
+data(NWOGrants)
+d <- NWOGrants
+d
+```
+Draw a DAG (gender)
+```{r}
+library(dagitty)
+dag <- dagitty( "dag {
+  G -> D
+  G -> A
+  D -> A
+}")
+coordinates(dag) <- list( x=c(G=0, A=2, D=1), y=c(G=0, A=0, D=1))
+drawdag( dag )
+```
+
+
+```{r}
+dat_list <- list(
+    awards = as.integer(d$awards),
+    apps = as.integer(d$applications),
+    gid = ifelse( d$gender=="m" , 1L , 2L ),
+    disc = as.integer(d$discipline))
+dat_list
+```
+
+```{r}
+m1 <- ulam(
+    alist(
+        awards ~ binomial( apps , p ),
+        logit(p) <- a[gid],
+        a[gid] ~ normal(0,1.5)
+    ),
+    data=dat_list , chains=4 , cores=4 , cmdstan=TRUE )
+```
+```{r}
+precis( m1, 2 )
+```
+
+```{r}
+post <- extract.samples(m1)
+p_diff <- sapply( 1:2000 , function(i) 
+             inv_logit( post$a[i,1] ) - inv_logit( post$a[i,2] ) )
+precis(p_diff)
+```
+It seems like males a[1] have higher rates of award (around 3%).
+
+If considering discipline 
+
+```{r}
+m2 <- ulam(
+    alist(
+        awards ~ binomial( apps , p ),
+        logit(p) <- a[gid] + d[disc],
+        a[gid] ~ normal(0,1.5),
+        d[disc] ~ normal(0,1)
+    ),
+    data=dat_list , chains=4 , cores=4 , cmdstan=TRUE )
+```
+
+```{r}
+precis( m2, 2 )
+```
+Notice the chains have higher rhat (doesn't sample very well).
+
+```{r}
+post <- extract.samples(m2)
+p_diff <- post$a[,1] - post$a[,2] 
+precis(p_diff)
+```
+Still a difference, but it's not the original scale.
+
+Possible interventions: gender blind?? (is that possible?)
+
+11H5
+
+Consider an observed confound (e.g. career stage) influences both choice of discipline and probablity of award. 
+
+New DAG
+```{r}
+dag <- dagitty( "dag {
+  G -> D
+  G -> A
+  D -> A
+  S -> D
+  S -> A
+}")
+coordinates(dag) <- list( x=c(G=0, A=2, D=1, S=1), y=c(G=0, A=0, D=1, S=2))
+drawdag( dag )
+```
+Identifying all paths from G to A
+```{r}
+paths(dag, from ="G", to = "A", Z = list(), limit = 100,
+  directed = FALSE)
+```
+Check conditional independence
+```{r}
+impliedConditionalIndependencies( dag)
+```
+
+Simulation of backdoor path
+```{r}
+set.seed(135)
+N <- 1000
+G <- rbern(N)
+S <- rbern(N)
+D <- rbern( N , p=inv_logit( G + S ) )
+A <- rbern( N , p=inv_logit( 0.25*G + D + 2*S - 2 ) )
+dat_sim <- list( G=G , D=D , A=A )
+```
+
+```{r}
+dat_sim$G[1:10]
+```
+
+```{r}
+m3 <- ulam(
+    alist(
+        A ~ bernoulli( p ),
+        logit(p) <- a + d*D + g*G,
+        c(a,d,g) ~ normal(0, 1)
+    ),
+    data=dat_sim , chains=4 , cores=4 , cmdstan=TRUE )
+```
+```{r}
+precis(m3)
+```
+In the simulation, we put in 0.25 as the gender bias, however, the model can't recover it.
+
+A different simulation
+```{r}
+set.seed(135)
+N <- 1000
+G <- rbern(N)
+S <- rbern(N)
+D <- rbern( N , p=inv_logit( 2*G + S ) )
+A <- rbern( N , p=inv_logit( 0*G + D + 2*S - 2 ) )
+dat_sim2 <- list( G=G , D=D , A=A )
+```
+
+```{r}
+m3_new <- ulam( m3, data=dat_sim2, chains=4, cores=4, cmdstan = TRUE)
+```
+
+```{r}
+precis(m3_new, 2)
+```
+
+
+
