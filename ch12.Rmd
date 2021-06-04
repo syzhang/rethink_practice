@@ -1,0 +1,122 @@
+---
+title: "Rethink chapter 12 practice"
+output: html_notebook
+---
+
+12H7
+
+In the trolley data, education level is associated with response, but is this association causal?
+
+```{r}
+library(rethinking)
+data(Trolley)
+d <- Trolley
+```
+
+Age is a possible confound through education. Draw a DAG representing hypothetical causal relationships among response, education and age.
+
+```{r}
+library(dagitty)
+dag <- dagitty( "dag {
+  A -> R
+  E -> R
+  A -> E
+}")
+coordinates(dag) <- list( x=c(A=0, E=2, R=1), y=c(A=0, E=0, R=1))
+drawdag( dag )
+```
+Which causal model do you need to evaluate the causal influence of education on response? Fit these models.
+
+```{r}
+edu_levels <- c( 6 , 1 , 8 , 4 , 7 , 2 , 5 , 3 )
+d$edu_new <- edu_levels[ d$edu ]
+d$edu[1:5]
+```
+```{r}
+idx <- 1:nrow(d)
+dat <- list(
+    y = d$response[idx] ,
+    A = d$action[idx],
+    I = d$intention[idx],
+    C = d$contact[idx],
+    E = as.integer( d$edu_new[idx] ),
+    edu_norm = normalize( d$edu_new[idx] ),
+    age = standardize( d$age[idx] ),
+    alpha = rep(2,7) )
+```
+
+```{r}
+m1 <- ulam(
+    alist(
+        y ~ ordered_logistic( phi , cutpoints ),
+        phi <- bE*sum( delta_shell[1:E] ) + bA*A + bC*C + BI*I + bAge*age,
+        BI <- bI + bIA*A + bIC*C ,
+        c(bA,bI,bC,bIA,bIC,bE,bAge) ~ normal( 0 , 0.5 ),
+        cutpoints ~ normal( 0 , 1.5 ),
+        vector[8]: delta_shell <<- append_row( 0 , delta ),
+        simplex[7]: delta ~ dirichlet( alpha )
+    ), data=dat , chains=4 , cores=4 , cmdstan=TRUE )
+```
+
+```{r}
+precis(m1)
+```
+
+Education is now positively influencing response (without age it's negative). Previously age wasn't included, now it is and changes model behaviour -> backdoor.
+
+
+
+
+12H8
+
+Consider gender as an additional variable. Suppose that gender might influence education as well as responses.
+
+Draw the DAG to include gender.
+
+```{r}
+library(dagitty)
+dag2 <- dagitty( "dag {
+  A -> R
+  G -> R
+  G -> E -> R
+  A -> E -> R
+}")
+coordinates(dag2) <- list( x=c(A=0, E=2, R=1, G=3), y=c(A=0, E=0, R=1, G=1))
+drawdag( dag2 )
+```
+
+G influences both R and E. E is now a collider (backdoor).
+
+```{r}
+paths(dag2, from ="G", to = "R", Z = list(), limit = 100,
+  directed = FALSE)
+```
+
+```{r}
+adjustmentSets( dag2, exposure = 'E', outcome = 'R', effect = 'total' )
+```
+Need to condition on A and G to close backdoor (ie get unconfounded estimate of E).
+
+Including A and G and E in model
+
+```{r}
+dat$female <- ifelse( d$male==1 , 0L , 1L )
+m2 <- ulam(
+    alist(
+        y ~ ordered_logistic( phi , cutpoints ),
+        phi <- bE*sum( delta_shell[1:E] ) + bA*A + bC*C + BI*I + bAge*age + bF*female,
+        BI <- bI + bIA*A + bIC*C ,
+        c(bA,bI,bC,bIA,bIC,bE,bAge,bF) ~ normal( 0 , 0.5 ),
+        cutpoints ~ normal( 0 , 1.5 ),
+        vector[8]: delta_shell <<- append_row( 0 , delta ),
+        simplex[7]: delta ~ dirichlet( alpha )
+    ), data=dat , chains=4 , cores=4 , cmdstan=TRUE )
+```
+
+```{r}
+precis(m2)
+```
+
+Age is now close to zero (still a bit negative), and gender getting most of the negative weights, suggesting it explains the previous influence of education.
+
+It's possible that the sample is skewed by gender and education, worth checking to see if eg older men are less likely to respond comparing to women, hence skewing education.
