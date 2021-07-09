@@ -1,0 +1,227 @@
+---
+title: "Rethink chapter 15 practice"
+output: html_notebook
+---
+
+15H7.
+
+Some lad named Andrew made an eight-sided spinner. He wanted to know if it is fair. So he spun it a bunch of times, recording the counts of each value. Then he accidentally spilled coffee over the 4s and 5s. The surviving data are:
+
+Value 12345678
+Frequency 18 19 22 NA NA 19 20 22
+
+Andrew doesn’t remember how many times he spun the spinner. Andrew is not sure the spinner is fair (every value is equally likely), but he’s confident that none of the values is twice as likely as any other. Dirichlet distribution to capture this prior belief. Plot the joint posterior distribution of 4s and 5s.
+
+```{r}
+y <- c( 18 , 19 , 22 , NA , NA , 19 , 20 , 22 )
+y
+```
+
+unobserved variables
+(1) number of spins, (2) probabilities of 1-8 (not sure if it's fair), (3) counts of 4 and 5s
+
+(1) number of spins at least
+```{r}
+sum(y, na.rm = TRUE)
+```
+No upper bound, use a Poisson prior for spins
+```{r}
+mean(y, na.rm = TRUE)
+```
+set priors of 4 and 5 at mean of 20
+S ~ Poisson(40)+120
+
+(2) probabilities of 1-8
+vector p using a Dirichlet prior (for categorical outcomes), simulating draws, seems quite extreme (there are no doubled probs)
+
+```{r}
+library(gtools)
+p <- rdirichlet( 1e3 , alpha=rep(4,8) )
+plot( NULL , xlim=c(1,8) , ylim=c(0,0.3) , xlab="outcome" , ylab="probability" ) 
+for ( i in 1:10 ) lines( 1:8 , p[i,] , type="b" , lwd=2 )
+ 
+```
+
+```{r}
+twicer <- function( p ) {
+    o <- order( p )
+    if ( p[o][8]/p[o][1] > 2 ) return( TRUE ) else return( FALSE )
+}
+sum(apply(p, 1, twicer))
+```
+```{r}
+p <- rdirichlet( 1e3, alpha = rep(50, 8))
+sum(apply(p, 1, twicer))
+```
+better prior without too many samples violating rules
+
+```{r}
+plot( NULL , xlim=c(1,8) , ylim=c(0,0.3) , xlab="outcome" , ylab="probability" ) 
+for ( i in 1:10 ) lines( 1:8 , p[i,] , type="b" , lwd=2 )
+```
+
+(3) counts of 4 and 5s
+discrete variables, 
+
+```{r}
+code15H7 <- '
+data{
+    int N;
+    int y[N];
+    int y_max; // consider at most this many spins for y4 and y5
+    int S_mean;
+}
+parameters{
+    simplex[N] p;   // probabilities of each outcome
+}
+model{
+    vector[(1+y_max)*(1+y_max)] terms;
+    int k = 1;
+
+    p ~ dirichlet( rep_vector(50,N) );
+
+    // loop over possible values for unknown cells 4 and 5
+    // this code updates posterior of p
+    for ( y4 in 0:y_max ) {
+        for ( y5 in 0:y_max ) {
+            int Y[N] = y;
+            Y[4] = y4;
+            Y[5] = y5;
+            terms[k] = poisson_lpmf(y4+y5|S_mean-120) 
+                       + multinomial_lpmf(Y|p);
+            k = k + 1;
+        }//y5
+    }//y4
+    target += log_sum_exp(terms);
+}
+generated quantities{
+    matrix[y_max+1,y_max+1] P45; // prob y4,y5 takes joint values
+    // now compute Prob(y4,y5|p)
+    {
+        matrix[(1+y_max),(1+y_max)] terms;
+        int k = 1;
+        real Z;
+        for ( y4 in 0:y_max ) {
+            for ( y5 in 0:y_max ) {
+              int Y[N] = y;
+              Y[4] = y4;
+              Y[5] = y5;
+              terms[y4+1,y5+1] = poisson_lpmf(y4+y5|S_mean-120) 
+                                 + multinomial_lpmf(Y|p);
+            }//y5
+        }//y4
+        Z = log_sum_exp( to_vector(terms) );
+        for ( y4 in 0:y_max )
+            for ( y5 in 0:y_max )
+                P45[y4+1,y5+1] = exp( terms[y4+1,y5+1] - Z );
+    }
+}
+'
+```
+
+```{r}
+y <- c(18,19,22,-1,-1,19,20,22)
+dat <- list(
+    N = length(y),
+    y = y,
+    S_mean = 160,
+    y_max = 40 )
+```
+
+```{r}
+library(rethinking)
+m15H7 <- cstan( model_code=code15H7 , data=dat , chains=4 , cores=4 )
+```
+```{r}
+post <- extract.samples(m15H7)
+```
+
+joint distribution of 4 and 5s
+```{r}
+y_max <- dat$y_max
+plot( NULL , xlim=c(10,y_max-10) , ylim=c(10,y_max-10) ,
+    xlab="number of 4s" , ylab="number of 5s" )
+mtext( "posterior distribution of 4s and 5s" )
+for ( y4 in 0:y_max ) for ( y5 in 0:y_max ) {
+    k <- grau( mean( post$P45[,y4+1,y5+1] )/0.01 )
+    points( y4 , y5 , col=k , pch=16 , cex=1.5 )
+}
+
+```
+```{r}
+code15H7a <- '
+data{
+    int N;
+    int y[N];
+    int y_max; // consider at most this many spins for y4 and y5
+    int S_mean;
+}
+parameters{
+    simplex[N] p;   // probabilities of each outcome
+}
+model{
+    vector[(1+y_max)*(1+y_max)] terms;
+    int k = 1;
+
+    p ~ dirichlet( rep_vector(2,N) );
+
+    // loop over possible values for unknown cells 4 and 5
+    // this code updates posterior of p
+    for ( y4 in 0:y_max ) {
+        for ( y5 in 0:y_max ) {
+            int Y[N] = y;
+            Y[4] = y4;
+            Y[5] = y5;
+            terms[k] = poisson_lpmf(y4+y5|S_mean-120) 
+                       + multinomial_lpmf(Y|p);
+            k = k + 1;
+        }//y5
+    }//y4
+    target += log_sum_exp(terms);
+}
+generated quantities{
+    matrix[y_max+1,y_max+1] P45; // prob y4,y5 takes joint values
+    // now compute Prob(y4,y5|p)
+    {
+        matrix[(1+y_max),(1+y_max)] terms;
+        int k = 1;
+        real Z;
+        for ( y4 in 0:y_max ) {
+            for ( y5 in 0:y_max ) {
+              int Y[N] = y;
+              Y[4] = y4;
+              Y[5] = y5;
+              terms[y4+1,y5+1] = poisson_lpmf(y4+y5|S_mean-120) 
+                                 + multinomial_lpmf(Y|p);
+            }//y5
+        }//y4
+        Z = log_sum_exp( to_vector(terms) );
+        for ( y4 in 0:y_max )
+            for ( y5 in 0:y_max )
+                P45[y4+1,y5+1] = exp( terms[y4+1,y5+1] - Z );
+    }
+}
+'
+```
+
+```{r}
+library(rethinking)
+m15H7a <- cstan( model_code=code15H7a , data=dat , chains=4 , cores=4 )
+```
+
+```{r}
+posta <- extract.samples(m15H7a)
+```
+
+joint distribution of 4 and 5s
+```{r}
+y_max <- dat$y_max
+plot( NULL , xlim=c(10,y_max-10) , ylim=c(10,y_max-10) ,
+    xlab="number of 4s" , ylab="number of 5s" )
+mtext( "posterior distribution of 4s and 5s" )
+for ( y4 in 0:y_max ) for ( y5 in 0:y_max ) {
+    k <- grau( mean( posta$P45[,y4+1,y5+1] )/0.01 )
+    points( y4 , y5 , col=k , pch=16 , cex=1.5 )
+}
+
+```
